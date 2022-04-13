@@ -20,6 +20,7 @@
     "skipLibCheck": true,
     "incremental": true,
     "lib": ["es2017", "dom", "WebWorker"],
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true
   }
 }

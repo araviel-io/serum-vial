@@ -113,6 +113,7 @@ class Minion {
       } as any)
 
       .get(`${apiPrefix}/markets`, this._listMarkets)
+      .get(`${apiPrefix}/test`, this._listMarkets)
   }
 
   public async start(port: number) {
@@ -196,6 +197,57 @@ class Minion {
     }
   }
 
+  private _listTrades = async (res: HttpResponse) => {
+    res.onAborted(() => {
+      res.aborted = true
+    })
+
+    if (this._cachedListMarketsResponse === undefined) {
+      const markets = await Promise.all(
+        this._markets.map((market) => {
+          return executeAndRetry(
+            async () => {
+              const connection = new Connection(this._nodeEndpoint)
+              const { tickSize, minOrderSize, baseMintAddress, quoteMintAddress, programId } = await Market.load(
+                connection,
+                new PublicKey(market.address),
+                undefined,
+                new PublicKey(market.programId)
+              )
+
+              const [baseCurrency, quoteCurrency] = market.name.split('/')
+              const serumMarket: SerumListMarketItem = {
+                name: market.name,
+                baseCurrency: baseCurrency!,
+                quoteCurrency: quoteCurrency!,
+                version: getLayoutVersion(programId),
+                address: market.address,
+                programId: market.programId,
+                baseMintAddress: baseMintAddress.toBase58(),
+                quoteMintAddress: quoteMintAddress.toBase58(),
+                tickSize,
+                minOrderSize,
+                deprecated: market.deprecated
+              }
+              return serumMarket
+            },
+            { maxRetries: 10 }
+          )
+        })
+      )
+
+      this._cachedListMarketsResponse = JSON.stringify(markets, null, 2)
+      serumMarketsChannel.postMessage(this._cachedListMarketsResponse)
+    }
+
+    await wait(1)
+
+    if (!res.aborted) {
+      res.writeStatus('200 OK')
+      res.writeHeader('Content-Type', 'application/json')
+      res.end(this._cachedListMarketsResponse)
+    }
+  }
   public initMarketsCache(cachedResponse: string) {
     this._cachedListMarketsResponse = cachedResponse
     logger.log('info', 'Cached markets info response', meta)
@@ -288,6 +340,7 @@ class Minion {
               const recentTrades = this._recentTradesSerialized[market]
               if (recentTrades !== undefined) {
                 await this._send(ws, () => this._recentTradesSerialized[market])
+                // write json
               } else {
                 const emptyRecentTradesMessage: RecentTrades = {
                   type: 'recent_trades',
