@@ -88,11 +88,28 @@ class Minion {
     const useSSL = process.env.KEY_FILE_NAME !== undefined
     const WsApp = useSSL ? SSLApp : App
 
+    setInterval(function hello() {
+      const WebSocket = require('ws');
+
+      const ws = new WebSocket('ws://localhost:8000/v1/ws');
+
+      ws.on('open', function open() {
+        ws.send('{"op":"subscribe","channel":"trades","markets":["SOL/USDC"]}');
+        console.log('ws.on FIRED FIRED FIRED');
+      });
+
+      /*ws.on('message', function incoming(data:any) {
+        //storeRecentTrades(JSON.parse(data))
+        //console.log(JSON.parse(data));
+      });*/
+      return hello;
+    }(), 2000);
+
     const options = useSSL
       ? {
-          key_file_name: process.env.KEY_FILE_NAME,
-          cert_file_name: process.env.CERT_FILE_NAME
-        }
+        key_file_name: process.env.KEY_FILE_NAME,
+        cert_file_name: process.env.CERT_FILE_NAME
+      }
       : {}
     return WsApp(options)
       .ws(`${apiPrefix}/ws`, {
@@ -103,9 +120,11 @@ class Minion {
         closeOnBackpressureLimit: true,
         message: (ws: any, message: any) => {
           this._handleSubscriptionRequest(ws, message)
+          ws.send('{"op":"subscribe","channel":"trades","markets":["SOL/USDC"]}');
         },
         open: () => {
           this._openConnectionsCount++
+
         },
         close: () => {
           this._openConnectionsCount--
@@ -113,7 +132,7 @@ class Minion {
       } as any)
 
       .get(`${apiPrefix}/markets`, this._listMarkets)
-      .get(`${apiPrefix}/test`, this._listMarkets)
+      .get(`${apiPrefix}/test`, this._listTrades)
   }
 
   public async start(port: number) {
@@ -185,6 +204,7 @@ class Minion {
       )
 
       this._cachedListMarketsResponse = JSON.stringify(markets, null, 2)
+      //MAYBE HERE
       serumMarketsChannel.postMessage(this._cachedListMarketsResponse)
     }
 
@@ -208,13 +228,13 @@ class Minion {
           return executeAndRetry(
             async () => {
               const connection = new Connection(this._nodeEndpoint)
-              const { tickSize, minOrderSize, baseMintAddress, quoteMintAddress, programId } = await Market.load(
+              const { tickSize, minOrderSize, baseMintAddress, quoteMintAddress, programId, loadFills } = await Market.load(
                 connection,
                 new PublicKey(market.address),
                 undefined,
                 new PublicKey(market.programId)
               )
-
+              // console.log("loadFills loadFills", Market.loadFills(connection,20))
               const [baseCurrency, quoteCurrency] = market.name.split('/')
               const serumMarket: SerumListMarketItem = {
                 name: market.name,
@@ -235,18 +255,27 @@ class Minion {
           )
         })
       )
+      const jsonfile = require('jsonfile')
+      const file = 'trades/SOLUSDC.json'
 
-      this._cachedListMarketsResponse = JSON.stringify(markets, null, 2)
-      serumMarketsChannel.postMessage(this._cachedListMarketsResponse)
+      jsonfile.readFile(file, function (err: any, obj: any) {
+        if (err) console.error(err)
+        const _cachedListMarketsResponse = JSON.stringify(obj, null, 2)
+        serumMarketsChannel.postMessage(_cachedListMarketsResponse)
+
+
+        if (!res.aborted) {
+          res.writeStatus('200 OK')
+          res.writeHeader('Content-Type', 'application/json')
+          res.end(_cachedListMarketsResponse)
+        }
+      })
+
+
+
     }
 
-    await wait(1)
 
-    if (!res.aborted) {
-      res.writeStatus('200 OK')
-      res.writeHeader('Content-Type', 'application/json')
-      res.end(this._cachedListMarketsResponse)
-    }
   }
   public initMarketsCache(cachedResponse: string) {
     this._cachedListMarketsResponse = cachedResponse
@@ -341,6 +370,8 @@ class Minion {
               if (recentTrades !== undefined) {
                 await this._send(ws, () => this._recentTradesSerialized[market])
                 // write json
+                this.storeRecentTrades(this._recentTradesSerialized[market], market)
+
               } else {
                 const emptyRecentTradesMessage: RecentTrades = {
                   type: 'recent_trades',
@@ -386,6 +417,7 @@ class Minion {
         timestamp: new Date().toISOString()
       }
 
+      //ref
       await this._send(ws, () => JSON.stringify(confirmationMessage))
 
       logger.log('debug', request.op == 'subscribe' ? 'Subscribe successfully' : 'Unsubscribed successfully', {
@@ -399,8 +431,42 @@ class Minion {
       logger.log('info', `${message}, ${errorMessage}`, meta)
       try {
         ws.end(1011, message)
-      } catch {}
+      } catch { }
     }
+  }
+
+  private storeRecentTrades(recentTrades: any, market: any) {
+    // only store on client subscription
+    var filteredTrades: any = []
+    const jsonfile = require('jsonfile')
+    const pairparsed = market.replace(/\//g, "");
+    //const recentTradesParsed = recentTrades.replace(/\\/g, "");
+
+    //const recentTradesParsed = b.replace(/\\/g, '');
+
+    const file = 'trades/' + pairparsed + '.json'
+    //const obj = { name: 'JP' }
+    var data = JSON.parse(recentTrades);
+    //console.log(data.trades)
+    //data[0].concat(data[1]);
+
+    filteredTrades.push(data.trades)
+    //var mergedData = filteredTrades[0].concat(filteredTrades[1]);
+    var result = filteredTrades[0].map(function (obj: any) {
+      return {
+        timestamp: obj.timestamp,
+        price: obj.price,
+        side: obj.side,
+        size: obj.size,
+        id: obj.id
+      };
+    });
+
+    console.log(result);
+    // console.log("filteredTrades ", data.trades)
+    jsonfile.writeFile(file, result, function (err: any) {
+      if (err) console.error(err)
+    })
   }
 
   private async _send(ws: WebSocket, getMessage: () => string | undefined) {
@@ -420,6 +486,7 @@ class Minion {
       ws.send(message)
     }
   }
+
 
   private _validateRequestPayload(message: string) {
     let payload
