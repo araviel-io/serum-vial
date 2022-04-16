@@ -15,7 +15,7 @@ import {
 } from './helpers'
 import { logger } from './logger'
 import { MessageEnvelope } from './serum_producer'
-import { ErrorResponse, RecentTrades, SerumListMarketItem, SerumMarket, SubRequest, SuccessResponse } from './types'
+import { ErrorResponse, RecentTrades, SerumListMarketItem, SerumMarket, SubRequest, SuccessResponse, Trade } from './types'
 
 const meta = {
   minionId: threadId
@@ -67,6 +67,7 @@ class Minion {
   private readonly _l2SnapshotsSerialized: { [market: string]: string } = {}
   private readonly _l3SnapshotsSerialized: { [market: string]: string } = {}
   private readonly _recentTradesSerialized: { [market: string]: string } = {}
+  private readonly _currentTradeSerialized: { [market: string]: string } = {}
   private readonly _quotesSerialized: { [market: string]: string } = {}
   private readonly _marketNames: string[]
   private _listenSocket: any | undefined = undefined
@@ -94,6 +95,7 @@ class Minion {
       const ws = new WebSocket('ws://localhost:8000/v1/ws');
 
       ws.on('open', function open() {
+     //   ws.send('{"op":"subscribe","channel":"trades","markets":["BTC/USDC"]}');
         ws.send('{"op":"subscribe","channel":"trades","markets":["SOL/USDC"]}');
         console.log('ws.on FIRED FIRED FIRED');
       });
@@ -271,8 +273,6 @@ class Minion {
         }
       })
 
-
-
     }
 
 
@@ -303,6 +303,11 @@ class Minion {
 
       if (message.type === 'recent_trades') {
         this._recentTradesSerialized[message.market] = message.payload
+      }
+
+      if (message.type === 'trade') {
+        this._recentTradesSerialized[message.market] = message.payload
+        console.log("PAYLOAD", message.payload)
       }
 
       if (message.publish) {
@@ -370,7 +375,7 @@ class Minion {
               if (recentTrades !== undefined) {
                 await this._send(ws, () => this._recentTradesSerialized[market])
                 // write json
-                this.storeRecentTrades(this._recentTradesSerialized[market], market)
+                //console.log("R E C E N T ", recentTrades)
 
               } else {
                 const emptyRecentTradesMessage: RecentTrades = {
@@ -383,7 +388,26 @@ class Minion {
                 await this._send(ws, () => JSON.stringify(emptyRecentTradesMessage))
               }
             }
+            // this.storeRecentTrades(this._recentTradesSerialized[message.payload], message.market)
+            if (type === 'trade') {
+              const recentTrades = this._currentTradeSerialized[market]
+              if (recentTrades !== undefined) {
+                await this._send(ws, () => this._currentTradeSerialized[market])
+                // write json
+                console.log("C U R R E N T ", recentTrades)
+                this.storeRecentTrades(this._currentTradeSerialized[market], market)
 
+              } else {
+                const emptyRecentTradesMessage: RecentTrades = {
+                  type: 'recent_trades',
+                  market,
+                  timestamp: new Date().toISOString(),
+                  trades: []
+                }
+
+                await this._send(ws, () => JSON.stringify(emptyRecentTradesMessage))
+              }
+            }
             if (type === 'quote') {
               await this._send(ws, () => this._quotesSerialized[market])
             }

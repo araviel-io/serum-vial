@@ -143,13 +143,13 @@ export function getDefaultMarkets(): SerumMarket[] {
       deprecated: false
     })
   }
-  for (const mangoSpotMarket of getMangoSpotMarkets()) {
+  /*for (const mangoSpotMarket of getMangoSpotMarkets()) {
     if (defaultMarkets.some((s) => s.name === mangoSpotMarket.name)) {
       continue
     }
 
     defaultMarkets.push(mangoSpotMarket)
-  }
+  }*/
 
   return defaultMarkets
 }
